@@ -1,0 +1,1 @@
+This `react-shared` project (openbase-react-shared) is a shared React library that provides authentication components, account management, and payment integration for Openbase projects.

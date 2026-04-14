@@ -1,7 +1,7 @@
 {
-  "name": "openbase-drf-api-client",
+  "name": "openbase-auth-client",
   "version": "1.2.0",
-  "description": "Adds auth and payment to your Openbase project",
+  "description": "Auth and session React helpers for OpenBase projects",
   "type": "module",
   "main": "./dist/index.js",
   "module": "./dist/index.js",
@@ -40,7 +40,7 @@
   "keywords": [
     "openbase",
     "auth",
-    "payment"
+    "django-allauth"
   ],
   "author": "Gabe Montague",
   "license": "MIT"

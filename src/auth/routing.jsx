@@ -20,6 +20,14 @@ export function isServerPath(path) {
   return SERVER_PATH_PREFIXES.some((prefix) => path.startsWith(prefix));
 }
 
+// Every ACCOUNT_PATHS entry lives under this root, so it identifies the auth
+// screens without enumerating them.
+const ACCOUNT_ROOT = "/account";
+
+export function isAccountPath(pathname) {
+  return pathname === ACCOUNT_ROOT || pathname.startsWith(`${ACCOUNT_ROOT}/`);
+}
+
 function PostLoginRedirect() {
   const location = useLocation();
   const next = new URLSearchParams(location.search).get("next");
@@ -92,12 +100,26 @@ export function pathForPendingFlow(auth) {
   return null;
 }
 
-function navigateToPendingFlow(auth) {
+// Multi-step sign-in (login-by-code, MFA, email verification, passkey signup)
+// hops between flow steps before the session exists. Each hop must carry the
+// pending `?next=` forward: the destination is only read once, at the end of the
+// flow, so dropping it here strands the user on LOGIN_REDIRECT_URL instead of
+// wherever they were headed. It is re-validated on every hop rather than only at
+// the end, so a hostile value never survives a transition.
+function navigateToPendingFlow(auth, location) {
   const path = pathForPendingFlow(auth);
-  if (path) {
-    return <Navigate to={path} />;
+  if (!path) {
+    return null;
   }
-  return null;
+  return <Navigate to={withNext(path, location)} replace />;
+}
+
+function withNext(path, location) {
+  const next = new URLSearchParams(location.search).get("next");
+  if (!next) {
+    return path;
+  }
+  return `${path}?next=${encodeURIComponent(safeRedirectPath(next))}`;
 }
 
 export function AuthenticatedRoute({ children }) {
@@ -129,20 +151,33 @@ export function AuthChangeRedirector({ children }) {
     case AuthChangeEvent.LOGGED_OUT:
       return <Navigate to={URLs.LOGOUT_REDIRECT_URL} />;
     case AuthChangeEvent.LOGGED_IN:
-      return <PostLoginRedirect />;
+      // Every auth screen is wrapped in AnonymousRoute, which redirects on this
+      // same transition and renders a beat earlier. By the time this case runs
+      // the user is usually already at their destination -- a location with no
+      // `next` to read, where PostLoginRedirect would fall back to
+      // LOGIN_REDIRECT_URL and undo the redirect that just happened. Only take
+      // over while still on an auth screen, which is the case AnonymousRoute
+      // cannot finish: a server-path destination leaves the SPA location
+      // untouched because it navigates via window.location.
+      return isAccountPath(location.pathname) ? <PostLoginRedirect /> : children;
     case AuthChangeEvent.REAUTHENTICATED: {
-      const next = new URLSearchParams(location.search).get("next") || "/";
-      return <Navigate to={next} />;
+      const next = new URLSearchParams(location.search).get("next");
+      return <Navigate to={safeRedirectPath(next, "/")} />;
     }
     case AuthChangeEvent.REAUTHENTICATION_REQUIRED: {
       const next = `next=${encodeURIComponent(
         location.pathname + location.search
       )}`;
-      const path = pathForFlow(auth.data.flows[0]);
+      // Prefer the pending flow over flows[0]: allauth lists every reauth
+      // method it will accept, and the first is not necessarily the one to
+      // run. Picking wrong can land on a step the device cannot complete
+      // (e.g. WebAuthn inside a webview).
+      const path =
+        pathForPendingFlow(auth) ?? pathForFlow(auth.data.flows[0]);
       return <Navigate to={`${path}?${next}`} state={{ reauth: auth }} />;
     }
     case AuthChangeEvent.FLOW_UPDATED:
-      const pendingFlow = navigateToPendingFlow(auth);
+      const pendingFlow = navigateToPendingFlow(auth, location);
       if (!pendingFlow) {
         throw new Error(
           `FLOW_UPDATED auth event had no pending flow to navigate to; flows: ${JSON.stringify(
